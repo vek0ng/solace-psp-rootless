@@ -115,7 +115,7 @@ We will use similar checks like above to see what Podman is doing with running p
 
 ## 3 - Example Postgres Rootless
 
-Databases traditionally run as non-root user. We will do a quick podman test with Postgres running as `postgres` user.
+Databases traditionally run as non-root user. We will do a quick podman test with Postgres running as `postgres` user. Take some time to analyze and fully understand this example.
 
 ```bash
 ubuntu@podman:~$ podman pull postgres
@@ -176,8 +176,6 @@ drwxrwxr-x. 2 1000025 1000025 4096 Sep 13 07:14 /home/ubuntu/html
 ubuntu@podman:~$ ps faxo "uname,pid,args" | grep "postgres"
 # finally, it works!
 ```
-
-Take some time to analyze and fully understand this example.
 
 **Does running `rootless` Podman as `non-root` make sense?**
 

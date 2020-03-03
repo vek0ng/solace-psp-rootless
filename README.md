@@ -1,4 +1,4 @@
-# Solace PubSub+ Event Broker Software on Podman and Docker in Rootless and Non-root Modes
+# Solace PubSub+ Event Broker Rootless on Podman and Docker
 
 Table of Content
 

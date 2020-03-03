@@ -2,33 +2,23 @@
 
 Table of Content
 
-- [Solace PubSub+ Event Broker Software on Podman and Docker in Rootless and Non-root Modes](#solace-pubsub-event-broker-software-on-podman-and-docker-in-rootless-and-non-root-modes)
-	- [0 - Installation](#0---installation)
-		- [Podman](#podman)
-		- [Docker](#docker)
-	- [1 - The Audit Log and Login User UID](#1---the-audit-log-and-login-user-uid)
-	- [2 - How Docker Works](#2---how-docker-works)
-	- [3 - How Podman Compares With Docker](#3---how-podman-compares-with-docker)
-	- [4 - Example Postgres in Rootless Mode](#4---example-postgres-in-rootless-mode)
-	- [5 - Running Solace PubSub+ Event Broker Software on Podman and Docker](#5---running-solace-pubsub-event-broker-software-on-podman-and-docker)
-		- [Test Cases](#test-cases)
-		- [PubSub+ on Podman](#pubsub-on-podman)
-		- [PubSub+ on Docker](#pubsub-on-docker)
-	- [6 - Verify PubSub+ Software](#6---verify-pubsub-software)
-	- [7 - Notes](#7---notes)
-	- [8 - Conclusion](#8---conclusion)
+- [0 - Installation](#0---installation)
+- [1 - The Audit Log and Login User UID](#1---the-audit-log-and-login-user-uid)
+- [2 - How Podman Compares With Docker](#2---how-podman-compares-with-docker)
+- [3 - Example Postgres Rootless](#3---example-postgres-rootless)
+- [4 - Solace PubSub+ Event Broker Software on Podman](#4---solace-pubsub-event-broker-software-on-podman)
+	- [Test Cases](#test-cases)
+	- [PubSub+ on Podman](#pubsub-on-podman)
+- [5 - Verify PubSub+ Software](#5---verify-pubsub-software)
+- [6 - Notes](#6---notes)
+- [7 - Conclusion](#7---conclusion)
 
-[Docker] takes the `client/server` approach for developing, managing and running containers. It has a build time and run time daemon, `dockerd` which needs to be started with root privileges. It uses a commandline API client `docker` to handle all communications with the daemon.
 
-[Podman] is a daemonless container engine. It is a drop-in replacement for Docker, such that `alias docker=podman` works just fine. Podman runs OCI containers as root or `rootless` user. Podman adopted a `folk/exec` container runtime pattern for managing and running containers. It has its own set of add-value features for Kubernetes and OpenShift.
+[Podman] is a daemonless container engine. It is a drop-in replacement for Docker, such that `alias docker=podman` works just fine. Podman runs OCI containers as root or `rootless` user. Unlike Docker's `client/server` model, Podman adopted a `folk/exec` container runtime pattern for managing and running containers. It has its own set of add-value features for Kubernetes and OpenShift.
 
-Solace customers have been asking to run PubSub+ containers rootless with Podman. This how-to aims to evaluate this and compare Podman with Docker  from a container namespace security view point. Docker recently introduced `rootless` as an experimental feature in v19.03.
+PS+ users have wanted to run PubSub+ containers rootless. This how-to aims to evaluate this from a container namespace security stand point.
 
 ## 0 - Installation
-
-We will use two Ubuntu 18.04 LTS machines called `podman` and `docker`, respectively. Start yours whichever may is convenient. We use [multipass] to launch the VMs.
-
-### Podman
 
 See [Podman] documentation for information on how to install Podman for your OS.
 
@@ -78,75 +68,6 @@ ubuntu@podman:~ podman system migrate
 ubuntu@podman:~ podman unshare cat /proc/self/uid_map
 ```
 
-### Docker
-
-You will install Docker v19.03+. Since `rootless` is currently experimental, we need separate approaches for installing standard docker and rootless flavors.
-
-```bash
-# create VM
-multipass launch -n docker -c 2 -m 2G -d 50G
-multipass shell docker
-
-ubuntu@docker:~  sudo apt update && sudo apt upgrade -y
-ubuntu@docker:~ . /etc/os-release
-```
-
-Install Docker.
-
-**Rootful Docker** - Docker daemon runs as root.
-
-```bash
-# install Docker
-ubuntu@docker:~$ sudo apt-get update
-ubuntu@docker:~$ sudo apt-get install apt-transport-https ca-certificates curl    gnupg-agent software-properties-common
-ubuntu@docker:~$ curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-ubuntu@docker:~$ sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-ubuntu@docker:~$ sudo apt-get update
-ubuntu@docker:~$ sudo apt-get install docker-ce docker-ce-cli containerd.io
-```
-
-To avoid typing `sudo`, add your user to the `docker` group. Note: Docker daemon still runs as root.
-
-```bash
-ubuntu@docker:~$ sudo usermod -aG docker ubuntu
-newgrp docker # or log out and log back in
-```
-
-**Rootless Docker** - Docker daemon runs as non-privileged user.
-
-Unlike, `userns-remap` mode where the daemon itself is running with root provileges, in rootless mode, both the daemon and the container are running without root privileges.
-
-Remove existing docker instances.
-
-```bash
-ubuntu@docker:~$ sudo apt-get remove docker docker-engine docker.io containerd runc
-ubuntu@docker:~$ sudo apt-get purge docker-ce
-ubuntu@docker:~$ sudo rm -rf /var/lib/docker
-```
-
-Install Docker.
-
-```bash
-ubuntu@docker:~$ curl -fsSL https://get.docker.com/rootless | sh
-
-ubuntu@docker:~$ cat << EOF >> ~/.bashrc
-export PATH=/home/ubuntu/bin:$PATH
-export DOCKER_HOST=unix:///run/user/1000/docker.sock
-EOF
-
-ubuntu@docker:~$ source ~/.bashrc
-# start dockerd rootless
-ubuntu@docker:~$ dockerd-rootless.sh --experimental --storage-driver vfs
-```
-
-After testing, you may want to uninstall the still experimental rootless docker.
-
-```bash
-ubuntu@docker:~$ systemctl --user stop docker
-ubuntu@docker:~$ rm ~/bin/{docker*,rootless*,containerd*,runc,vpnkit,ctr}
-ubuntu@docker:~$ rm -rf ~/.local/share/docker
-```
-
 ## 1 - The Audit Log and Login User UID
 
 We will start by surveying the Linux `audit` tools to help us reason about namespaces. `Audit` allows administrators to watch for security events on a system and have them logged to the `audit.log`.
@@ -185,27 +106,7 @@ ubuntu@podman:~ sudo cat /proc/self/loginuid
 
 We will use similar checks like above to see what Podman or Docker is doing with running processes on the host and in container namespaces thoughout these tests.
 
-## 2 - How Docker Works
-
-Docker daemon provides the functionality needed to:
-
-- Pull and push images from an image registry.
-- Make copies of images in a local container storage and to add layers to those containers.
-- Commit containers and remove local container images from the host repository.
-- Ask the kernel to run a container with the right namespace and cgroup, etc.
-
-![docker](images/k3s-docker.png)
-
-The Docker daemon does all the work with registries, images, containers, and the kernel. The Docker command-line interface (CLI) is an API client UI.
-
-Concerns about the Docker `client/server` approach:
-
-- A single process could be a single point of failure, the Docker daemon process owns all the child processes (the running containers).
-- If a failure occurred, then there were orphaned processes.
-- Building containers with the same daemon that runs containers leads to security vulnerabilities.
-- All Docker operations have to be conducted by a user (or users) with full root access.
-
-## 3 - How Podman Compares With Docker
+## 2 - How Podman Compares With Docker
 
 - You install Podman instead of Docker.
 - You do not need to start or manage a daemon process.
@@ -217,9 +118,9 @@ Concerns about the Docker `client/server` approach:
 
 ![podman](images/k3s-podman.png)
 
-## 4 - Example Postgres in Rootless Mode
+## 3 - Example Postgres Rootless
 
-Databases run traditionally as non-root user. We will do a quick podman test of Postgres running as `postgres` user.
+Databases traditionally run as non-root user. We will do a quick podman test with Postgres running as `postgres` user.
 
 ```bash
 ubuntu@podman:~$ podman pull postgres
@@ -281,7 +182,7 @@ ubuntu@podman:~$ ps faxo "uname,pid,args" | grep "postgres"
 # finally, it works!
 ```
 
-Take some time to analyze this example!
+Take some time to analyze and fully understand this example.
 
 **Does running `rootless` Podman as `non-root` make sense?**
 
@@ -293,11 +194,11 @@ If you are already running the container as `rootless`, why should you run Postg
 4. You run postgres as `postgres` UID with non-root access in the container.
 5. To let `postgres` UID work with local files, ex `~/html`, use `podman unshare` command as shown above or add `postgres` to the `root` group.
 
-## 5 - Running Solace PubSub+ Event Broker Software on Podman and Docker
+## 4 - Solace PubSub+ Event Broker Software on Podman
 
-Earlier PubSub+ did not support `rootless` for several reasons including `sshd` requires root to allow restricted ports (80, 443 and 943) to work.
+Earlier PubSub+ versions did not support `rootless` for several reasons including when `sshd` requires root to allow restricted ports (80, 443 and 943) to work.
 
-PubSub+ v9.4+ supports `rootless`. Restricted ports have been replaced with non-ephemeral ports (above 1024):
+PubSub+ v9.4+ now supports `rootless`. Restricted ports have been replaced with non-ephemeral ports (above 1024):
 
 | From | To   | Purpose                |
 | ---- | ---- | ---------------------- |
@@ -305,7 +206,7 @@ PubSub+ v9.4+ supports `rootless`. Restricted ports have been replaced with non-
 | 443  | 1443 | web transport over TLS |
 | 943  | 1943 | SEMP over TLS          |
 
-On initialization, if an arbitrary non-root container user is not specified on the commandline with `--user=UID`, a default user UID=1000001 is assigned. SSH will run as this container user.
+On initialization, if an arbitrary non-root container user is not specified on the commandline with `--user=UID`, the image assigns a default user UID=1000001. SSH will run as this container user.
 
 ### Test Cases
 
@@ -348,40 +249,12 @@ We will investigate running PS+ on Podman and Docker using the following test ca
 		<td align="center">yes</td>
 		<td align="left">podman run -d -p 8080:8080 -p 55555:55555 --user 30:30 --shm-size=2g --env username_admin_globalaccesslevel=admin --env username_admin_password=admin --name=solace solace/solace-pubsub-standard</td>
 	</tr>
-	<tr>
-		<th align="left">Docker</th>
-		<td>5</td>
-		<td align="center">no</td>
-		<td align="center">no</td>
-		<td align="left">sudo docker run -d -p 8080:8080 -p 55555:55555 --shm-size=2g --env username_admin_globalaccesslevel=admin --env username_admin_password=admin --name=solace solace/solace-pubsub-standard</td>
-	</tr>
-	<tr>
-		<th align="left">Docker</th>
-		<td>6</td>
-		<td align="center">no</td>
-		<td align="center">yes</td>
-		<td align="left">sudo docker run -d -p 8080:8080 -p 55555:55555 --user 30:30 --shm-size=2g --env username_admin_globalaccesslevel=admin --env username_admin_password=admin --name=solace solace/solace-pubsub-standard</td>
-	</tr>
-	<tr>
-		<th align="left">Docker</th>
-		<td>7</td>
-		<td align="center">yes</td>
-		<td align="center">no</td>
-		<td align="left">docker run -d -p 8080:8080 -p 55555:55555 --shm-size=2g --env username_admin_globalaccesslevel=admin --env username_admin_password=admin --name=solace solace/solace-pubsub-standard</td>
-	</tr>
-	<tr>
-		<th align="left">Docker</th>
-		<td>8</td>
-		<td align="center">yes</td>
-		<td align="center">yes</td>
-		<td align="left">docker run -d -p 8080:8080 -p 55555:55555 --user 30:30 --shm-size=2g --env username_admin_globalaccesslevel=admin --env username_admin_password=admin --name=solace solace/solace-pubsub-standard</td>
-	</tr>
 </table>
 
 ### PubSub+ on Podman
 
 ```bash
-# check setuid map
+# check subuid map
 ubuntu@podman:~$ cat /etc/subuid
 ubuntu:1000000:65536
 ```
@@ -435,25 +308,7 @@ cni-podman0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
         RX errors 0  dropped 0  overruns 0  frame 0
         TX packets 1440  bytes 662550 (662.5 KB)
         TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
-
-ens3: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
-        inet 192.168.122.86  netmask 255.255.255.0  broadcast 192.168.122.255
-        inet6 fe80::5054:ff:fed6:2c57  prefixlen 64  scopeid 0x20<link>
-        ether 52:54:00:d6:2c:57  txqueuelen 1000  (Ethernet)
-        RX packets 120570  bytes 693057861 (693.0 MB)
-        RX errors 0  dropped 26394  overruns 0  frame 0
-        TX packets 44387  bytes 5923964 (5.9 MB)
-        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
-
-lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
-        inet 127.0.0.1  netmask 255.0.0.0
-        inet6 ::1  prefixlen 128  scopeid 0x10<host>
-        loop  txqueuelen 1000  (Local Loopback)
-        RX packets 424  bytes 39086 (39.0 KB)
-        RX errors 0  dropped 0  overruns 0  frame 0
-        TX packets 424  bytes 39086 (39.0 KB)
-        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
-
+....
 veth84007e1d: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
         inet6 fe80::8086:40ff:fe20:8bec  prefixlen 64  scopeid 0x20<link>
         ether 82:86:40:20:8b:ec  txqueuelen 0  (Ethernet)
@@ -546,167 +401,15 @@ USER   PID   PPID   %CPU     ELAPSED           TTY   TIME    COMMAND
 ... omitted remaining lines
 ```
 
-### PubSub+ on Docker
-
-```bash
-# check setuid map
-ubuntu@docker:~$ cat /etc/subuid
-ubuntu:1000000:65536
-```
-
-5. Docker runs as root, non-root user is not set. Solace sets default UID=1000001
-
-```bash
-ubuntu@docker:~$ sudo docker run -d -p 8080:8080 -p 55555:55555 --shm-size=2g --env username_admin_globalaccesslevel=admin --env username_admin_password=admin --name=solace solace/solace-pubsub-standard
-# Works!
-```
-
-```bash
-# audit check logged in user. uid=4294967295 means login uid is not set.
-sudo docker exec solace cat /proc/self/loginuid
-4294967295
-```
-
-```bash
-# solace sets default ui=1000001 in the container
-ubuntu@docker:~$ sudo docker exec solace id
-uid=1000001(appuser) gid=0(root) groups=0(root)
-```
-
-```bash
-# solaces processes run as uid=1000001 in the default namespace on the host
-ubuntu@docker:~$ ps faxo "uname,pid,args" | grep solace
-1000001   4634      \_ /usr/sw/loads/soltr_9.4.0.78/bin/solacedaemon --vmr -z -f /var/lib/solace/config/SolaceStartup.txt -r -1
-1000001   5228          \_ nginx: master process nginx -c /var/lib/solace/config/nginx.conf -g pid /var/run/solace/nginx.pid;
-1000001   5247          \_ /sbin/rsyslogd -n -i /var/run/solace/rsyslogd.pid
-```
-
-```bash
-# solace processes run in the uid=1000001 namespace in the container
-ubuntu@docker:~$ sudo docker top solace
-UID       PID   PPID     C    STIMETTY   TIME       CMD         
-1000001   4634  4608     0    22:09?     00:00:00   /usr/sw/loads/soltr_9.4.0.78/bin/solacedaemon --vmr -z -f /var/lib/solace/config/SolaceStartup.txt -r -1$        
-1000001   4906  4634     0    22:09?     00:00:06   python /usr/sw/loads/soltr_9.4.0.78/scripts/vmr-solaudit -d
-1000001   5045  4634     0    22:09?     00:00:00   /usr/sw/loads/soltr_9.4.0.78/bin/watchdog -w 0 -R 900
-1000001   5046  4634     0    22:09?     00:00:00   /usr/sw/loads/soltr_9.4.0.78/bin/cmdserver
-... omitted remaining lines
-```
-
-6. Docker runs as root and non-root user is set.
-
-```bash
-ubuntu@podman:~$ sudo docker run -d -p 8080:8080 -p 55555:55555 --user 30:30 --shm-size=2g --env username_admin_globalaccesslevel=admin --env username_admin_password=admin --name=solace solace/solace-pubsub-standard
-# Works! See notes below.
-```
-
-```bash
-# audit check logged in user. uid=4294967295 means login uid is not set.
-ubuntu@docker:~$ sudo docker exec solace cat /proc/self/loginuid
-4294967295
-```
-
-```bash
-# solace sets ui=30 in the container
-ubuntu@docker:~$ sudo docker exec solace id
-uid=30(30) gid=30(appgrp) groups=30(appgrp)
-```
-
-```bash
-# solaces processes run in the uid=30 unallocated namespace on the host. Insecure.
-ubuntu@docker:~$ ps faxo "uname,pid,args" |grep solace
-30        6170      \_ /usr/sw/loads/soltr_9.4.0.78/bin/solacedaemon --vmr -z -f /var/lib/solace/config/SolaceStartup.txt -r -1
-30        6690          \_ nginx: master process nginx -c /var/lib/solace/config/nginx.conf -g pid /var/run/solace/nginx.pid;
-30        6709          \_ /sbin/rsyslogd -n -i /var/run/solace/rsyslogd.pid
-```
-
-```bash
-# solace processes run in the uid=30 namespace in the container
-ubuntu@docker:~$ sudo docker top solace
-UID                 PID                 PPID                C                   STIME               TTY               TIME                CMD
-30                  6170                6145                0                   22:58               ?                 00:00:00            /usr/sw/loads/soltr_9.4.0.78/bin/solacedaemon --vmr -z -f /var/lib/sol
-ace/config/SolaceStartup.txt -r -1
-30                  6440                6170                0                   22:58               ?                 00:00:00            python /usr/sw/loads/soltr_9.4.0.78/scripts/vmr-solaudit -d
-30                  6507                6170                0                   22:58               ?                 00:00:00            /usr/sw/loads/soltr_9.4.0.78/bin/watchdog -w 0 -R 900
-30                  6508                6170                0                   22:58               ?                 00:00:00            /usr/sw/loads/soltr_9.4.0.78/bin/cmdserver
-... omitted remaining lines
-```
-
-7. Docker runs rootless and non-root user is not set. Solace default UID=1000001
-
-Rootless Docker requires the `rootless` v19.03 Docker installed. See instructions above.
-
-```bash
-ubuntu@docker:~$ docker run -d -p 8080:8080 -p 55555:55555 --shm-size=2g --env username_admin_globalaccesslevel=admin --env username_admin_password=admin --name=solace solace/solace-pubsub-standard
-# Error! See notes below.
-```
-
-8. Docker runs rootless and non-root user is set.
-
-```bash
-ubuntu@docker:~$ docker run -d -p 8080:8080 -p 55555:55555 --user 30:30 --shm-size=2g --env username_admin_globalaccesslevel=admin --env username_admin_password=admin --name=solace solace/solace-pubsub-standard
-# Works! See notes below.
-```
-
-```bash
-# audit check logged in user - unset by docker
-ubuntu@docker:~$ docker exec solace cat /proc/self/uid_map
-         0       1000          1
-         1    1000000      65536
-ubuntu@docker:~$ docker exec solace cat /proc/self/loginuid
-0
-# logged in user root is mapped to host non-root user
-# users 1 - 65536 are mapped from 1000000 and so on...
-```
-
-```bash
-# solace sets ui=30 in the container
-ubuntu@docker:~$ docker exec solace id
-uid=30(30) gid=30(appgrp) groups=30(appgrp)
-```
-
-```bash
-# solaces processes run as uid=1000029 in the allocated namespace on the host. Secure.
-ubuntu@docker:~$ ps faxo "uname,pid,args" |grep solace
-1000029   8325      |       |       \_ /usr/sw/loads/soltr_9.4.0.78/bin/solacedaemon --vmr -z -f /var/lib/solace/config/SolaceStartup.txt -r -1
-1000029   8827      |       |           \_ nginx: master process nginx -c /var/lib/solace/config/nginx.conf -g pid /var/run/solace/nginx.pid;
-1000029   8846      |       |           \_ /sbin/rsyslogd -n -i /var/run/solace/rsyslogd.pid
-```
-
-```bash
-# solace processes. Top does not work!
-ubuntu@docker:~$ docker top solace
-UID                 PID                 PPID                C                   STIME               TTY                 TIME                CMD
-```
-
-```bash
-# network interfaces. Does not use host CNI. Therefore, it is configured by non-root user
-ubuntu@docker:~$ ifconfig
-ens3: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
-        inet 192.168.122.221  netmask 255.255.255.0  broadcast 192.168.122.255
-        inet6 fe80::5054:ff:fe30:5f92  prefixlen 64  scopeid 0x20<link>
-        ether 52:54:00:30:5f:92  txqueuelen 1000  (Ethernet)
-        RX packets 64669  bytes 598686800 (598.6 MB)
-        RX errors 0  dropped 73  overruns 0  frame 0
-        TX packets 24079  bytes 3437303 (3.4 MB)
-        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
-
-lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
-        inet 127.0.0.1  netmask 255.0.0.0
-        inet6 ::1  prefixlen 128  scopeid 0x10<host>
-        loop  txqueuelen 1000  (Local Loopback)
-        RX packets 318  bytes 34160 (34.1 KB)
-        RX errors 0  dropped 0  overruns 0  frame 0
-        TX packets 318  bytes 34160 (34.1 KB)
-        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
-```
-
-## 6 - Verify PubSub+ Software
+## 5 - Verify PubSub+ Software
 
 Minimal verification that the PubSub+ installation works.
 
-**Solace PubSub+ Manager**
+**PubSub+ Console Manager**
 
 Open a browser and enter the url `http://<your-event broker's-ip-address>:8080`. Log in as user `admin` and password `admin`.
+
+**PubSub+ CLI**
 
 Check Solace CLI management tool. Connect to the container image.
 
@@ -722,9 +425,9 @@ solace(configure)\#
 ...other commands...
 ```
 
-Checkout [Solace CLI Configuration] for additional commands to test your installation.
+Checkout [Solace CLI Configuration] for additional information.
 
-## 7 - Notes
+## 6 - Notes
 
 The results of testing rootful vs rootless on Podman vs Docker are collated in the table below. These tests only looked at how Docker and namespaces Podman handle namespaces and for the user to introspect on what it means to run rootful vs rootless. Bear in mind that Podman was developed to run daemonless and rootless. Docker recently added rootless in v19.03 as an experimental feature.
 
@@ -784,80 +487,30 @@ The results of testing rootful vs rootless on Podman vs Docker are collated in t
 		<td align="center">30</td>
 		<td align="center">1000029</td>
 		<td align="center">no</td>
-	</tr>	
-	<tr>
-		<th align="left">Docker</th>
-		<td>5</td>
-		<td align="center">no</td>
-		<td align="center">no</td>
-		<td align="center">pass</td>
-		<td align="center">4294967295</td>
-		<td align="center">1000001</td>
-		<td align="center">1000001</td>
-		<td align="center">yes</td>
-	</tr>
-	<tr>
-		<th align="left">Docker</th>
-		<td>6</td>
-		<td align="center">no</td>
-		<td align="center">yes</td>
-		<td align="center">pass</td>
-		<td align="center">4294967295</td>
-		<td align="center">30</td>
-		<td align="center">30</td>
-		<td align="center">yes</td>
-	</tr>
-	<tr>
-		<th align="left">Docker</th>
-		<td>7</td>
-		<td align="center">yes</td>
-		<td align="center">no</td>
-		<td align="center">fail</td>
-		<td align="center">-</td>
-		<td align="center">-</td>
-		<td align="center">-</td>
-		<td align="center">-</td>
-	</tr>
-	<tr>
-		<th align="left">Docker</th>
-		<td>8</td>
-		<td align="center">yes</td>
-		<td align="center">yes</td>
-		<td align="center">pass</td>
-		<td align="center">0</td>
-		<td align="center">30</td>
-		<td align="center">1000029</td>
-		<td align="center">no</td>
 	</tr>
 </table>
 
-- Podman and Docker results show similarities and minor differences for Solace PubSub+ Docker image.
-
-- The same Podman binary runs `rootful` and `rootless`. Docker v19.03 is the first version to implement `rootless`. A **different binary** needs to be installed in the user's home directory to run docker as `rootless`.
+- One Podman binary runs `rootful` and `rootless`. Docker v19.03 introduced `rootless`, but it is still experimental. Docker requires a running `dockerd` daemon to manage containers. `docker` is the client CLI that communicates with `dockerd`.
 
 - Table: Result summary
   
-  - Items 1 and 5: rootful (`sudo`) and Solace assigned default uid. Podman and Docker containers start up correctly. InPodman and Docker, Solace assigns same UID=1000001 to PS+ processes in the container and on the host. The logged in use `loginuid` is the tracked as the non-root host user, in our case `ubuntu` UID=1000.
+  - Items 1: rootful / default. Podman and Docker containers start up correctly. In Podman, Solace assigns same UID=1000001 to PS+ processes in the container and on the host. The logged in use `loginuid` is the tracked as the non-root host user, in our case `ubuntu` UID=1000.
   
-  - Lines 2 and 6: rootful (`sudo`) and non-root uid. Podman and Docker start up correctly. Both assign UID=30 to Solace PS+ processes in the container and on the host. Note that ruuning as UID=30 on the host is outside the `/etc/setuid` entry which starts at UID=1000000. If UID=30 exists on the host, the container process can reach it and vice versa. Also, there is another security issue:
-  
-  	Podman has a better security model. In (items 1 and 2), `auditctl` knows the `loginuid` of the logged in user - it is set to UID=1000, the host user `ubuntu`. Docker, on the other hand does not set the `loginuid`, so it defaults to an unknown UID=4294967295 used by several kernel processes such as `systemd` and `init`. Linux `auditctl` reports this transaction as `unset`, or unknown host user (items 5 and 6). This can be exploited to mask a security breach.
+  - Item 2: rootful / non-root. Podman starts up correctly. PS+ processes show same UID=30 on he host and in the container. Note; processes running with UID=30 on the host is not what we are aiming to do. We set UIDs in `/etc/subuid` to start at 1000000.
 	
-  - Items 3 and 7: rootless and Solace assigned default uid. Podman and Docker containers fail to start. H\The host's non-root user `ubuntu` does not have permission to set `loginuid` to UID=1000001 (Solace image default UID).
+  - Items 3: rootless / default. Podman container fails to start. The `loginuid` is 0 which maps to `ubuntu` UID=1000 on the host. The `appuid` range cannot exceed 65536. Solace default UID=1000001 clearly exceeds this range.
 
 	>Error: container_linux.go:345: starting container process caused "setup user: invalid argument": OCI runtime error
   
-  - Items 4 and 8: rootless and non-root uid. Podman and Docker behave the same. `loginuid` UID=0 (root) in the container maps to UID 1000 (ubuntu) on the host. The container `root` has no more permissions on the host than the logged in user `ubuntu`. Surbordinate processes (including Solace `appuser`) have UID 1 - 65536 in the container and UID 1000000 - 1065535 on the host. So, `--user 30:30` means that Solace `appuser` runs as UID 30 in the container and 1000029 on the host.
+  - Items 4: rootless / non-root. `loginuid` is 0 which maps to `ubuntu` UID 1000 on the host. The container `root` can have no more permissions on the host than the logged in user `ubuntu`. Child processes (including Solace `appuser`) have UID 1 - 65536 in the container and UID 1000000 - 1065535 on the host. So, `--user 30:30` means that Solace `appuser` runs as UID 30 in the container and 1000029 on the host.
 
-- `Rootful` Podman and Docker (`sudo`) both use host CNI networking. `Rootless` Podman and Docker require user namespace networking that can be started without root permission such, for example `slirp4netns`. This may pose a performance bottleneck, however it can be swapped out - see [Configuring container networking with Podman] documentation.
+- Networking: `Rootful` Podman (`sudo`) requires the host CNI. `Rootless` Podman use user namespace networking that can start without root permission such as `slirp4netns`.
 
-## 8 - Conclusion
+## 7 - Conclusion
 
-Podman is gaining popularity as a Docker alternative for managing and running containers daemonless and rootless. It was created by RedHat as opensource and has support for Kubernetes and OpenShift. Docker only recently started to support rootless, still experimental at this point.
+Podman is gaining popularity as a secure Docker alternative for managing and running containers daemonless and rootless. It was created by RedHat as an opensource project. It has enterprise support and features for Kubernetes and OpenShift.
 
-When running PubSub+ rootless, set the `--user=UID` flag on the `podman` commandline. If this is not done, Solace with try to assign the default UID=1000001 - this will fail.
-
-Running Podman as usual with `sudo` works as expected. Solace PubSub+ v9.4 processes can run `rootless` on the host and `non-root` in the container. This how-to guide set out to test this and learn what was happening with namespaces under to hood.
+When running PubSub+ v9.4 rootless, set the `--user localUID:remoteUID` flag on the `podman` commandline within the range set in `/etc/subuid` and `/etc/subgid`. If this is not done, Solace with try to assign the default UID=1000001 - this may fail.
 
 
 [multipass]: https://multipass.run/

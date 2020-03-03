@@ -98,7 +98,7 @@ ubuntu@podman:~ sudo cat /proc/self/loginuid
 1000
 ```
 
-We will use similar checks like above to see what Podman or Docker is doing with running processes on the host and in container namespaces thoughout these tests.
+We will use similar checks like above to see what Podman is doing with running processes on the host and in container namespaces thoughout these tests.
 
 ## 2 - How Podman Compares With Docker
 

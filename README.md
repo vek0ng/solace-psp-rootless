@@ -108,7 +108,6 @@ We will use similar checks like above to see what Podman or Docker is doing with
 - Podman stores its containers and images in one place `~/.local/share/containers/storage`.
 - Podman and Docker images are compatible, so existing Docker images work with Podman.
 - Podman does more than Docker for Kubernetes environments.
-- Unlioke Docker, Podman separates concerns, it uses [Buildah] for builds.
 
 ![podman](images/k3s-podman.png)
 

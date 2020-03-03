@@ -109,7 +109,9 @@ We will use similar checks like above to see what Podman or Docker is doing with
 - Podman and Docker images are compatible, so existing Docker images work with Podman.
 - Podman does more than Docker for Kubernetes environments.
 
-![podman](images/k3s-podman.png)
+|              Podman              |              Docker              |
+| :------------------------------: | :------------------------------: |
+| ![podman](images/k3s-podman.png) | ![docker](images/k3s-docker.png) |
 
 ## 3 - Example Postgres Rootless
 

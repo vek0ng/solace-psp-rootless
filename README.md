@@ -26,7 +26,6 @@ See [Podman] documentation for information on how to install Podman for your OS.
 # create VM
 multipass launch -n podman -c 2 -m 2G -d 50G
 multipass shell podman
-
 ubuntu@podman:~  sudo apt update && sudo apt upgrade -y
 ubuntu@podman:~ . /etc/os-release
 ```
@@ -57,7 +56,6 @@ For root-less podman to work, there are additional actions:
 ```bash
 # Setup CNI that can be launched by non-root user
 ubuntu@podman:~ sudo apt install slirp4netns
-
 # edit /etc/subuid and /etc/subgid
 ubuntu@podman:~ grep ubuntu /etc/subuid
 /etc/subuid:ubuntu:1000000:65536
@@ -77,16 +75,12 @@ Example - how to watch `/etc/shadow` file for changes.
 ```bash
 # install auditd if necessary
 ubuntu@podman:~ sudo apt install auditd
-
 # watch /etc/shadow
 ubuntu@podman:~ sudo auditctl -w /etc/shadow
-
 # now, try to modify the /etc/shadow file
 ubuntu@podman:~ touch /etc/shadow
-
 # audit /etc/shadow file
 ubuntu@podman:~ ausearch -f /etc/shadow -i -ts recent
-
 ...
 pid=11605 pid=11996 `auid=ubuntu` uid=ubuntu gid=ubuntu euid=ubuntu suid=ubuntu
 ...

@@ -1,4 +1,4 @@
-# Solace PubSub+ Event Broker Rootless on Podman and Docker
+# Solace PubSub+ Event Broker Rootless
 
 Table of Content
 
